@@ -88,6 +88,7 @@
   .card .k{color:var(--muted);font-size:13px;text-transform:uppercase;letter-spacing:.5px}
   .card .v{font-size:30px;font-weight:800;margin-top:4px}
   .card .v.money{color:var(--green)}
+  .card .v.neg{color:var(--red)}
   .section-title{font-size:15px;font-weight:700;margin:6px 0 10px;display:flex;align-items:center;justify-content:space-between}
   .datepick{background:var(--panel-2);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:8px 10px;font-size:14px}
   .salelist{display:flex;flex-direction:column;gap:8px}
@@ -223,8 +224,11 @@
       <div class="card"><div class="k">Ventas</div><div class="v money" id="rTotal">$0</div></div>
       <div class="card"><div class="k">Tickets</div><div class="v" id="rCount">0</div></div>
       <div class="card"><div class="k">Ticket prom.</div><div class="v" id="rAvg">$0</div></div>
+      <div class="card"><div class="k">Ganancia</div><div class="v money" id="rGan">$0</div></div>
     </div>
     <div class="topprods"><div class="section-title"><span>Lo más vendido</span></div><div id="topProds"></div></div>
+    <div class="section-title" style="margin-top:18px"><span>Gastos del día</span><button id="btnGasto" class="minibtn">💸 Agregar</button></div>
+    <div class="salelist" id="gastoList"></div>
     <div class="section-title" style="margin-top:18px"><span>Tickets del día</span></div>
     <div class="salelist" id="saleList"></div>
   </section>
@@ -295,6 +299,20 @@
   </div>
 </div>
 
+<!-- Modal gasto -->
+<div class="overlay" id="gastoModal">
+  <div class="modal">
+    <h3>💸 Nuevo gasto</h3>
+    <div class="field"><label>Concepto</label><input id="gConcepto" type="text" placeholder="Ej. Tortillas, gas, carne"></div>
+    <div class="field"><label>Monto ($)</label><input id="gMonto" type="number" inputmode="decimal" placeholder="0"></div>
+    <div class="field"><label>Categoría</label>
+      <input id="gCat" type="text" list="gcatList" placeholder="Insumos" autocomplete="off">
+      <datalist id="gcatList"><option value="Insumos"><option value="Renta"><option value="Sueldos"><option value="Servicios"><option value="Otros"></datalist></div>
+    <div class="field"><label style="display:flex;align-items:center;cursor:pointer"><input type="checkbox" id="gEfectivo" checked style="width:auto;margin-right:8px">Pagado en efectivo (de la caja)</label></div>
+    <div class="row2"><button class="btn sec" id="gCancelar">Cancelar</button><button class="btn guardar" id="gGuardar">Guardar</button></div>
+  </div>
+</div>
+
 <!-- Modal corte de caja -->
 <div class="overlay" id="corteModal">
   <div class="modal">
@@ -354,7 +372,7 @@
   }
 
   // ---- Estado / caché local ----
-  const K={menu:"pos_menu_cache",sales:"pos_sales_cache",outbox:"pos_outbox",neg:"pos_negocio",dev:"pos_device"};
+  const K={menu:"pos_menu_cache",sales:"pos_sales_cache",gastos:"pos_gastos_cache",outbox:"pos_outbox",neg:"pos_negocio",dev:"pos_device"};
   function lget(k,def){ try{const v=JSON.parse(localStorage.getItem(k));return v??def;}catch(e){return def;} }
   function lset(k,v){ localStorage.setItem(k,JSON.stringify(v)); }
 
@@ -362,6 +380,7 @@
   let negocio = lget(K.neg,null);            // {id,nombre,codigo}
   let menu = lget(K.menu,[]);
   let sales = lget(K.sales,[]);
+  let gastos = lget(K.gastos,[]);
   let outbox = lget(K.outbox,[]);
   let ticket=[], activeCat=null, editingId=null, pickedEmoji=EMOJIS[0];
   let realtimeChan=null, payMethod="efectivo";
@@ -409,7 +428,21 @@
       const {data,error}=await sb.from("ventas").select("*").eq("negocio_id",negocio.id)
         .gte("ts",since).order("ts",{ascending:false}).limit(5000);
       if(error) throw error;
-      sales=data; lset(K.sales,sales);
+      sales=data;
+      outbox.filter(o=>o.type==="venta").forEach(o=>{ if(!sales.find(s=>s.id===o.row.id)) sales.unshift(o.row); });
+      lset(K.sales,sales);
+      if($("#reporte").classList.contains("active")) renderReporte();
+    }catch(e){ /* caché */ }
+  }
+  async function pullGastos(){
+    try{
+      const since=new Date(Date.now()-120*864e5).toISOString();
+      const {data,error}=await sb.from("gastos").select("*").eq("negocio_id",negocio.id)
+        .gte("ts",since).order("ts",{ascending:false}).limit(5000);
+      if(error) throw error;
+      gastos=data;
+      outbox.filter(o=>o.type==="gasto").forEach(o=>{ if(!gastos.find(g=>g.id===o.row.id)) gastos.unshift(o.row); });
+      lset(K.gastos,gastos);
       if($("#reporte").classList.contains("active")) renderReporte();
     }catch(e){ /* caché */ }
   }
@@ -424,6 +457,8 @@
         else if(op.type==="prod_up"){ const {error}=await sb.from("productos").upsert(op.row,{onConflict:"id"}); if(error) throw error; }
         else if(op.type==="prod_del"){ const {error}=await sb.from("productos").delete().eq("id",op.id); if(error) throw error; }
         else if(op.type==="venta_del"){ const {error}=await sb.from("ventas").delete().eq("id",op.id); if(error) throw error; }
+        else if(op.type==="gasto"){ const {error}=await sb.from("gastos").upsert(op.row,{onConflict:"id"}); if(error) throw error; }
+        else if(op.type==="gasto_del"){ const {error}=await sb.from("gastos").delete().eq("id",op.id); if(error) throw error; }
       }catch(e){ rest.push(op); }
     }
     outbox=rest; lset(K.outbox,outbox);
@@ -439,12 +474,18 @@
         if($("#reporte").classList.contains("active")) renderReporte();
       })
       .on("postgres_changes",{event:"*",schema:"public",table:"productos",filter:"negocio_id=eq."+negocio.id}, ()=>{ pullMenu(); })
+      .on("postgres_changes",{event:"*",schema:"public",table:"gastos",filter:"negocio_id=eq."+negocio.id}, p=>{
+        if(p.eventType==="DELETE"){ gastos=gastos.filter(g=>g.id!==p.old.id); }
+        else { const r=p.new; const i=gastos.findIndex(g=>g.id===r.id); if(i>=0) gastos[i]=r; else gastos.unshift(r); }
+        lset(K.gastos,gastos);
+        if($("#reporte").classList.contains("active")) renderReporte();
+      })
       .subscribe();
   }
   async function connectAndSync(){
     $("#brandName").textContent = negocio.nombre.replace(/^Gorditas y burritos\s*/i,"").trim() || negocio.nombre;
     setStatus("sync");
-    await pullMenu(); await pullSales();
+    await pullMenu(); await pullSales(); await pullGastos();
     subscribeRealtime();
     await flushOutbox();
     idle();
@@ -476,7 +517,7 @@
     $$(".tab").forEach(x=>x.classList.remove("active"));
     $$(".view").forEach(x=>x.classList.remove("active"));
     t.classList.add("active"); $("#"+t.dataset.view).classList.add("active");
-    if(t.dataset.view==="reporte"){ renderReporte(); pullSales(); }
+    if(t.dataset.view==="reporte"){ renderReporte(); pullSales(); pullGastos(); }
     if(t.dataset.view==="editar") renderEdit();
   }));
   $("#statusPill").addEventListener("click",()=>{ flushOutbox(); if(negocio){ pullSales(); pullMenu(); } });
@@ -563,6 +604,8 @@
     const dayar=sales.filter(s=>todayKey(new Date(s.ts))===day);
     const tot=dayar.reduce((a,s)=>a+Number(s.total),0);
     $("#rTotal").textContent=peso(tot); $("#rCount").textContent=dayar.length; $("#rAvg").textContent=peso(dayar.length?tot/dayar.length:0);
+    const g=computeGastos(day); const gan=tot-g.total;
+    $("#rGan").textContent=peso(gan); $("#rGan").classList.toggle("neg",gan<0);
     const cnt={}; dayar.forEach(s=>(s.items||[]).forEach(i=>cnt[i.nombre]=(cnt[i.nombre]||0)+i.qty));
     const arr=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,5); const max=arr.length?arr[0][1]:1;
     $("#topProds").innerHTML=arr.length?arr.map(([n,q])=>`<div class="pbar"><div class="pn">${esc(n)}</div><div class="track"><div class="fill" style="width:${q/max*100}%"></div></div><div class="pc">${q}</div></div>`).join(""):'<div style="color:var(--muted);font-size:14px">Sin ventas este día.</div>';
@@ -582,7 +625,39 @@
       }
     }));
     $$("#saleList .prn").forEach(b=>b.addEventListener("click",()=>{ const s=sales.find(x=>x.id===b.dataset.print); if(s) printSale(s); }));
+    // gastos del día
+    $("#gastoList").innerHTML=g.list.length? g.list.map(x=>`<div class="sale"><div class="top">
+      <span class="time">${esc(x.categoria||"Gasto")} · ${x.efectivo===false?"banco":"efectivo"}</span>
+      <span class="amt" style="color:var(--red)">−${peso(x.monto)}</span></div>
+      <div class="det">${esc(x.concepto)}</div><button class="del" data-gid="${x.id}">Eliminar</button></div>`).join("")
+      : '<div style="color:var(--muted);font-size:14px">Sin gastos este día.</div>';
+    $$("#gastoList .del").forEach(b=>b.addEventListener("click",()=>{
+      if(confirm("¿Eliminar este gasto?")){
+        const gid=b.dataset.gid;
+        gastos=gastos.filter(x=>x.id!==gid); lset(K.gastos,gastos); renderReporte();
+        outbox=outbox.filter(o=>!(o.type==="gasto"&&o.row.id===gid));
+        outbox.push({type:"gasto_del",id:gid}); lset(K.outbox,outbox); flushOutbox();
+      }
+    }));
   }
+  function computeGastos(day){
+    const dd=gastos.filter(x=>todayKey(new Date(x.ts))===day);
+    let total=0,efectivo=0;
+    dd.forEach(x=>{ const m=Number(x.monto); total+=m; if(x.efectivo!==false) efectivo+=m; });
+    return {list:dd,total,efectivo};
+  }
+  function openGasto(){ if(!negocio){toast("Espera a que conecte");return;} $("#gConcepto").value=""; $("#gMonto").value=""; $("#gCat").value=""; $("#gEfectivo").checked=true; $("#gastoModal").classList.add("show"); setTimeout(()=>$("#gConcepto").focus(),50); }
+  $("#btnGasto").addEventListener("click",openGasto);
+  $("#gCancelar").addEventListener("click",()=>$("#gastoModal").classList.remove("show"));
+  $("#gGuardar").addEventListener("click",()=>{
+    const concepto=$("#gConcepto").value.trim(), monto=parseFloat($("#gMonto").value), cat=$("#gCat").value.trim()||"Otros", efectivo=$("#gEfectivo").checked;
+    if(!concepto){ toast("Escribe el concepto"); return; }
+    if(isNaN(monto)||monto<=0){ toast("Monto inválido"); return; }
+    const gst={id:uid(),negocio_id:negocio.id,ts:new Date().toISOString(),concepto,monto,categoria:cat,efectivo};
+    gastos.unshift(gst); lset(K.gastos,gastos);
+    outbox.push({type:"gasto",row:gst}); lset(K.outbox,outbox);
+    $("#gastoModal").classList.remove("show"); renderReporte(); flushOutbox(); toast("✓ Gasto registrado");
+  });
 
   // ---- Corte de caja ----
   function computeCorte(day){
@@ -604,7 +679,7 @@
     const day=$("#corteModal").dataset.day;
     const fondo=parseFloat($("#corteFondo").value)||0, retiros=parseFloat($("#corteRetiros").value)||0;
     lset(cajaKey(day),{fondo,retiros});
-    const c=computeCorte(day), eff=fondo+c.efectivo-retiros;
+    const c=computeCorte(day), g=computeGastos(day), eff=fondo+c.efectivo-retiros-g.efectivo;
     $("#corteResumen").innerHTML=`
       <div class="cr"><span>Tickets</span><span>${c.count}</span></div>
       <div class="cr"><span>Venta total</span><span>${peso(c.total)}</span></div>
@@ -612,13 +687,15 @@
       <div class="cr sub"><span>· Transferencia</span><span>${peso(c.transfer)}</span></div>
       <div class="cr sub"><span>· Tarjeta</span><span>${peso(c.tarjeta)}</span></div>
       <div class="cr"><span>+ Fondo inicial</span><span>${peso(fondo)}</span></div>
-      <div class="cr"><span>− Retiros / gastos</span><span>${peso(retiros)}</span></div>
-      <div class="cr tot"><span>Efectivo en caja</span><span>${peso(eff)}</span></div>`;
+      <div class="cr"><span>− Gastos en efectivo</span><span>${peso(g.efectivo)}</span></div>
+      <div class="cr"><span>− Retiros (otros)</span><span>${peso(retiros)}</span></div>
+      <div class="cr tot"><span>Efectivo en caja</span><span>${peso(eff)}</span></div>
+      <div class="cr sub"><span>Ganancia del día (venta − gastos)</span><span>${peso(c.total-g.total)}</span></div>`;
   }
   function corteHTML(){
     const day=$("#corteModal").dataset.day;
     const fondo=parseFloat($("#corteFondo").value)||0, retiros=parseFloat($("#corteRetiros").value)||0;
-    const c=computeCorte(day), eff=fondo+c.efectivo-retiros;
+    const c=computeCorte(day), g=computeGastos(day), eff=fondo+c.efectivo-retiros-g.efectivo;
     return `<div class="tk"><div class="c b big">Gorditas y burritos<br>el Güero</div>
       <div class="c sm">CORTE DE CAJA</div><div class="c sm">${day}</div><div class="sep"></div>
       <div class="r"><span>Tickets</span><span>${c.count}</span></div>
@@ -627,8 +704,11 @@
       <div class="r"><span>Transferencia</span><span>${peso(c.transfer)}</span></div>
       <div class="r"><span>Tarjeta</span><span>${peso(c.tarjeta)}</span></div><div class="sep"></div>
       <div class="r"><span>Fondo inicial</span><span>${peso(fondo)}</span></div>
-      <div class="r"><span>Retiros/gastos</span><span>${peso(retiros)}</span></div><div class="sep"></div>
-      <div class="r b big"><span>EFECTIVO EN CAJA</span><span>${peso(eff)}</span></div><div class="sep"></div>
+      <div class="r"><span>Gastos efectivo</span><span>${peso(g.efectivo)}</span></div>
+      <div class="r"><span>Retiros otros</span><span>${peso(retiros)}</span></div><div class="sep"></div>
+      <div class="r b big"><span>EFECTIVO EN CAJA</span><span>${peso(eff)}</span></div>
+      <div class="r"><span>Gastos total</span><span>${peso(g.total)}</span></div>
+      <div class="r b"><span>GANANCIA DÍA</span><span>${peso(c.total-g.total)}</span></div><div class="sep"></div>
       <div class="c sm">Generado ${new Date().toLocaleString("es-MX")}</div></div>`;
   }
   $("#btnCorte").addEventListener("click",openCorte);
@@ -690,9 +770,9 @@
   let toastT; function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),1800); }
 
   // ---- Eventos de red ----
-  window.addEventListener("online",()=>{ flushOutbox(); if(negocio){ pullSales(); pullMenu(); } });
+  window.addEventListener("online",()=>{ flushOutbox(); if(negocio){ pullSales(); pullGastos(); pullMenu(); } });
   window.addEventListener("offline",()=>setStatus("offline"));
-  document.addEventListener("visibilitychange",()=>{ if(!document.hidden && negocio){ flushOutbox(); pullSales(); } });
+  document.addEventListener("visibilitychange",()=>{ if(!document.hidden && negocio){ flushOutbox(); pullSales(); pullGastos(); } });
   setInterval(()=>{ if(negocio && navigator.onLine){ flushOutbox(); } },30000);
 
   // ---- Init ----
