@@ -142,6 +142,15 @@
   .cambio span{color:var(--accent)}
   .quickcash{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
   .quickcash button{height:46px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);color:var(--txt);font-weight:700;cursor:pointer}
+  .paymethods{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .paymethods button{height:48px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted);font-weight:700;font-size:13px;cursor:pointer}
+  .paymethods button.sel{border-color:var(--accent);background:var(--panel);color:var(--txt)}
+  .minibtn{background:var(--panel-2);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:8px 12px;font-size:14px;font-weight:700;cursor:pointer}
+  .corte-fecha{color:var(--muted);font-size:14px;margin-bottom:12px}
+  .corte-resumen{margin:6px 0 16px}
+  .cr{display:flex;justify-content:space-between;padding:7px 0;font-size:15px;border-bottom:1px solid var(--line)}
+  .cr.sub{color:var(--muted);font-size:13px;padding:4px 0 4px 10px;border-bottom:none}
+  .cr.tot{font-weight:800;font-size:19px;border-bottom:none;margin-top:8px;color:var(--green)}
 
   /* Login / código */
   #login{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;padding:22px;z-index:90}
@@ -204,7 +213,12 @@
   </section>
 
   <section class="view" id="reporte">
-    <div class="section-title"><span>Resumen del día</span><input type="date" class="datepick" id="datePick"></div>
+    <div class="section-title"><span>Resumen del día</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="btnCorte" class="minibtn">🧾 Corte</button>
+        <input type="date" class="datepick" id="datePick">
+      </div>
+    </div>
     <div class="cards">
       <div class="card"><div class="k">Ventas</div><div class="v money" id="rTotal">$0</div></div>
       <div class="card"><div class="k">Tickets</div><div class="v" id="rCount">0</div></div>
@@ -262,6 +276,13 @@
 <div class="overlay" id="cobroModal">
   <div class="modal">
     <div class="cobro-tot"><div class="l">Total a cobrar</div><div class="v" id="cTotal">$0</div></div>
+    <div class="field"><label>Método de pago</label>
+      <div class="paymethods" id="payMethods">
+        <button data-m="efectivo" class="sel">💵 Efectivo</button>
+        <button data-m="transferencia">🏦 Transfer.</button>
+        <button data-m="tarjeta">💳 Tarjeta</button>
+      </div>
+    </div>
     <div class="field"><label>¿Con cuánto paga? (opcional)</label>
       <input id="cPago" type="number" inputmode="decimal" placeholder="Efectivo recibido"></div>
     <div class="quickcash" id="quickCash"></div>
@@ -271,6 +292,23 @@
       <button class="btn cobrar" id="cConfirmar">Registrar</button>
     </div>
     <button class="btn" id="cConfirmarPrint" style="width:100%;background:var(--accent);margin-top:10px">🖨 Registrar e imprimir</button>
+  </div>
+</div>
+
+<!-- Modal corte de caja -->
+<div class="overlay" id="corteModal">
+  <div class="modal">
+    <h3>🧾 Corte de caja</h3>
+    <div class="corte-fecha" id="corteFecha"></div>
+    <div class="field"><label>Fondo inicial (con cuánto abrió la caja)</label>
+      <input id="corteFondo" type="number" inputmode="decimal" placeholder="0"></div>
+    <div class="field"><label>Retiros / gastos en efectivo (opcional)</label>
+      <input id="corteRetiros" type="number" inputmode="decimal" placeholder="0"></div>
+    <div id="corteResumen" class="corte-resumen"></div>
+    <div class="row2">
+      <button class="btn sec" id="corteCerrar">Cerrar</button>
+      <button class="btn" id="cortePrint" style="background:var(--accent)">🖨 Imprimir corte</button>
+    </div>
   </div>
 </div>
 
@@ -326,7 +364,9 @@
   let sales = lget(K.sales,[]);
   let outbox = lget(K.outbox,[]);
   let ticket=[], activeCat=null, editingId=null, pickedEmoji=EMOJIS[0];
-  let realtimeChan=null;
+  let realtimeChan=null, payMethod="efectivo";
+  const METODOS={efectivo:"Efectivo",transferencia:"Transfer.",tarjeta:"Tarjeta"};
+  function cajaKey(day){ return "pos_caja_"+day; }
 
   // ---- Estado de conexión (pill) ----
   function setStatus(state){
@@ -479,10 +519,12 @@
   $("#btnCobrar").addEventListener("click",()=>{
     if(!ticket.length){ toast("Agrega productos primero"); return; }
     $("#cTotal").textContent=peso(ticketTotal()); $("#cPago").value=""; $("#cCambio").innerHTML="";
+    payMethod="efectivo"; $$("#payMethods button").forEach(x=>x.classList.toggle("sel",x.dataset.m==="efectivo"));
     $("#quickCash").innerHTML=quickVals.map(v=>`<button data-v="${v}">$${v}</button>`).join("")+`<button data-v="exact">Exacto</button>`;
     $$("#quickCash button").forEach(b=>b.addEventListener("click",()=>{ $("#cPago").value=b.dataset.v==="exact"?ticketTotal():b.dataset.v; calcCambio(); }));
     $("#cobroModal").classList.add("show");
   });
+  $$("#payMethods button").forEach(b=>b.addEventListener("click",()=>{ payMethod=b.dataset.m; $$("#payMethods button").forEach(x=>x.classList.remove("sel")); b.classList.add("sel"); }));
   $("#cPago").addEventListener("input",calcCambio);
   function calcCambio(){ const pago=parseFloat($("#cPago").value)||0,tot=ticketTotal();
     $("#cCambio").innerHTML=(pago>=tot&&pago>0)?`Cambio: <span>${peso(pago-tot)}</span>`:""; }
@@ -503,7 +545,7 @@
     if(!ticket.length || !negocio) return;
     const pago=parseFloat($("#cPago").value)||0, tot=ticketTotal();
     const sale={ id:uid(), negocio_id:negocio.id, ts:new Date().toISOString(), total:tot,
-      pago: pago>=tot?pago:0, items: ticket.map(t=>({nombre:t.nombre,precio:t.precio,qty:t.qty})), dispositivo:deviceId };
+      pago: pago>=tot?pago:0, metodo:payMethod, items: ticket.map(t=>({nombre:t.nombre,precio:t.precio,qty:t.qty})), dispositivo:deviceId };
     sales.unshift(sale); lset(K.sales,sales);
     outbox.push({type:"venta",row:sale}); lset(K.outbox,outbox);
     ticket=[]; renderTicket(); $("#cobroModal").classList.remove("show");
@@ -527,7 +569,8 @@
     $("#saleList").innerHTML=dayar.length?dayar.map(s=>{
       const t=new Date(s.ts),hh=t.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
       const det=(s.items||[]).map(i=>`${i.qty}× ${esc(i.nombre)}`).join(", ");
-      return `<div class="sale"><div class="top"><span class="time">${hh}</span><span class="amt">${peso(s.total)}</span></div>
+      const ml=METODOS[s.metodo||"efectivo"]||"Efectivo";
+      return `<div class="sale"><div class="top"><span class="time">${hh} · ${ml}</span><span class="amt">${peso(s.total)}</span></div>
         <div class="det">${det}</div><button class="prn" data-print="${s.id}">🖨 Imprimir</button><button class="del" data-id="${s.id}">Eliminar</button></div>`;
     }).join(""):'<div style="color:var(--muted);font-size:14px">No hay tickets este día.</div>';
     $$("#saleList .del").forEach(b=>b.addEventListener("click",()=>{
@@ -540,6 +583,59 @@
     }));
     $$("#saleList .prn").forEach(b=>b.addEventListener("click",()=>{ const s=sales.find(x=>x.id===b.dataset.print); if(s) printSale(s); }));
   }
+
+  // ---- Corte de caja ----
+  function computeCorte(day){
+    const dd=sales.filter(s=>todayKey(new Date(s.ts))===day);
+    let efectivo=0,transfer=0,tarjeta=0,total=0;
+    dd.forEach(s=>{ const m=s.metodo||"efectivo", t=Number(s.total); total+=t;
+      if(m==="transferencia") transfer+=t; else if(m==="tarjeta") tarjeta+=t; else efectivo+=t; });
+    return {count:dd.length,total,efectivo,transfer,tarjeta};
+  }
+  function openCorte(){
+    const day=$("#datePick").value||todayKey();
+    $("#corteModal").dataset.day=day;
+    $("#corteFecha").textContent="Día: "+day;
+    const caja=lget(cajaKey(day),{fondo:0,retiros:0});
+    $("#corteFondo").value=caja.fondo||""; $("#corteRetiros").value=caja.retiros||"";
+    renderCorte(); $("#corteModal").classList.add("show");
+  }
+  function renderCorte(){
+    const day=$("#corteModal").dataset.day;
+    const fondo=parseFloat($("#corteFondo").value)||0, retiros=parseFloat($("#corteRetiros").value)||0;
+    lset(cajaKey(day),{fondo,retiros});
+    const c=computeCorte(day), eff=fondo+c.efectivo-retiros;
+    $("#corteResumen").innerHTML=`
+      <div class="cr"><span>Tickets</span><span>${c.count}</span></div>
+      <div class="cr"><span>Venta total</span><span>${peso(c.total)}</span></div>
+      <div class="cr sub"><span>· Efectivo</span><span>${peso(c.efectivo)}</span></div>
+      <div class="cr sub"><span>· Transferencia</span><span>${peso(c.transfer)}</span></div>
+      <div class="cr sub"><span>· Tarjeta</span><span>${peso(c.tarjeta)}</span></div>
+      <div class="cr"><span>+ Fondo inicial</span><span>${peso(fondo)}</span></div>
+      <div class="cr"><span>− Retiros / gastos</span><span>${peso(retiros)}</span></div>
+      <div class="cr tot"><span>Efectivo en caja</span><span>${peso(eff)}</span></div>`;
+  }
+  function corteHTML(){
+    const day=$("#corteModal").dataset.day;
+    const fondo=parseFloat($("#corteFondo").value)||0, retiros=parseFloat($("#corteRetiros").value)||0;
+    const c=computeCorte(day), eff=fondo+c.efectivo-retiros;
+    return `<div class="tk"><div class="c b big">Gorditas y burritos<br>el Güero</div>
+      <div class="c sm">CORTE DE CAJA</div><div class="c sm">${day}</div><div class="sep"></div>
+      <div class="r"><span>Tickets</span><span>${c.count}</span></div>
+      <div class="r"><span>Venta total</span><span>${peso(c.total)}</span></div>
+      <div class="r"><span>Efectivo</span><span>${peso(c.efectivo)}</span></div>
+      <div class="r"><span>Transferencia</span><span>${peso(c.transfer)}</span></div>
+      <div class="r"><span>Tarjeta</span><span>${peso(c.tarjeta)}</span></div><div class="sep"></div>
+      <div class="r"><span>Fondo inicial</span><span>${peso(fondo)}</span></div>
+      <div class="r"><span>Retiros/gastos</span><span>${peso(retiros)}</span></div><div class="sep"></div>
+      <div class="r b big"><span>EFECTIVO EN CAJA</span><span>${peso(eff)}</span></div><div class="sep"></div>
+      <div class="c sm">Generado ${new Date().toLocaleString("es-MX")}</div></div>`;
+  }
+  $("#btnCorte").addEventListener("click",openCorte);
+  $("#corteCerrar").addEventListener("click",()=>$("#corteModal").classList.remove("show"));
+  $("#cortePrint").addEventListener("click",()=>{ $("#printArea").innerHTML=corteHTML(); window.print(); });
+  $("#corteFondo").addEventListener("input",renderCorte);
+  $("#corteRetiros").addEventListener("input",renderCorte);
 
   function renderEdit(){
     const cats=getCats();
