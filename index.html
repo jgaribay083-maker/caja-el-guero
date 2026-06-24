@@ -238,7 +238,8 @@
     <div id="editList"></div>
     <button class="addbtn" id="btnAdd">+ Agregar producto</button>
     <div class="tools">
-      <button id="btnExport">⬇ Respaldar ventas (CSV)</button>
+      <button id="btnExpRango">📅 Exportar por fechas</button>
+      <button id="btnExport">⬇ Respaldar todo (CSV)</button>
       <button id="btnSync">↻ Sincronizar ahora</button>
     </div>
     <p style="color:var(--muted);font-size:12px;margin-top:14px;line-height:1.5">
@@ -310,6 +311,17 @@
       <datalist id="gcatList"><option value="Insumos"><option value="Renta"><option value="Sueldos"><option value="Servicios"><option value="Otros"></datalist></div>
     <div class="field"><label style="display:flex;align-items:center;cursor:pointer"><input type="checkbox" id="gEfectivo" checked style="width:auto;margin-right:8px">Pagado en efectivo (de la caja)</label></div>
     <div class="row2"><button class="btn sec" id="gCancelar">Cancelar</button><button class="btn guardar" id="gGuardar">Guardar</button></div>
+  </div>
+</div>
+
+<!-- Modal exportar por fechas -->
+<div class="overlay" id="expModal">
+  <div class="modal">
+    <h3>📅 Exportar por fechas</h3>
+    <div class="field"><label>Desde</label><input id="expDesde" type="date"></div>
+    <div class="field"><label>Hasta</label><input id="expHasta" type="date"></div>
+    <div class="row2"><button class="btn sec" id="expCancelar">Cancelar</button><button class="btn guardar" id="expVentas">Ventas (CSV)</button></div>
+    <button class="btn" id="expGastos" style="width:100%;background:var(--panel-2);color:var(--txt);border:1px solid var(--line);margin-top:10px">Gastos (CSV)</button>
   </div>
 </div>
 
@@ -765,7 +777,43 @@
     const b=new Blob(["﻿"+csv],{type:"text/csv"}),u=URL.createObjectURL(b),a=document.createElement("a");
     a.href=u; a.download="ventas_"+todayKey()+".csv"; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000);
   });
-  $("#btnSync").addEventListener("click",()=>{ flushOutbox(); if(negocio){ pullSales(); pullMenu(); toast("Sincronizando…"); } });
+  $("#btnSync").addEventListener("click",()=>{ flushOutbox(); if(negocio){ pullSales(); pullGastos(); pullMenu(); toast("Sincronizando…"); } });
+
+  function descargarCSV(nombre,rows){
+    const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const b=new Blob(["﻿"+csv],{type:"text/csv"}),u=URL.createObjectURL(b),a=document.createElement("a");
+    a.href=u; a.download=nombre; a.click(); setTimeout(()=>URL.revokeObjectURL(u),1000);
+  }
+  async function exportRange(tipo){
+    const d1=$("#expDesde").value, d2=$("#expHasta").value;
+    if(!d1||!d2){ toast("Elige las dos fechas"); return; }
+    if(d1>d2){ toast("La fecha 'desde' es mayor"); return; }
+    const desde=d1+"T00:00:00";
+    const hastaNext=new Date(new Date(d2+"T00:00:00").getTime()+864e5).toISOString();
+    let data=null;
+    try{
+      const {data:d,error}=await sb.from(tipo).select("*").eq("negocio_id",negocio.id).gte("ts",desde).lt("ts",hastaNext).order("ts",{ascending:true});
+      if(error) throw error; data=d;
+    }catch(e){
+      const src=tipo==="ventas"?sales:gastos;
+      data=src.filter(x=>{ const k=todayKey(new Date(x.ts)); return k>=d1&&k<=d2; }).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+    }
+    if(!data.length){ toast("No hay registros en ese rango"); return; }
+    let rows;
+    if(tipo==="ventas"){
+      rows=[["Fecha","Hora","Total","Metodo","Productos"]];
+      data.forEach(s=>{ const dt=new Date(s.ts); rows.push([todayKey(dt),dt.toLocaleTimeString("es-MX"),s.total,(s.metodo||"efectivo"),(s.items||[]).map(i=>`${i.qty}x ${i.nombre}`).join(" | ")]); });
+    } else {
+      rows=[["Fecha","Hora","Concepto","Categoria","Monto","Pagado"]];
+      data.forEach(g=>{ const dt=new Date(g.ts); rows.push([todayKey(dt),dt.toLocaleTimeString("es-MX"),g.concepto,g.categoria||"",g.monto,(g.efectivo===false?"banco":"efectivo")]); });
+    }
+    descargarCSV(tipo+"_"+d1+"_a_"+d2+".csv",rows);
+    $("#expModal").classList.remove("show"); toast("✓ "+data.length+" registros");
+  }
+  $("#btnExpRango").addEventListener("click",()=>{ const t=todayKey(); $("#expDesde").value=t.slice(0,8)+"01"; $("#expHasta").value=t; $("#expModal").classList.add("show"); });
+  $("#expCancelar").addEventListener("click",()=>$("#expModal").classList.remove("show"));
+  $("#expVentas").addEventListener("click",()=>exportRange("ventas"));
+  $("#expGastos").addEventListener("click",()=>exportRange("gastos"));
 
   let toastT; function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove("show"),1800); }
 
