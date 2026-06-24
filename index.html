@@ -80,7 +80,8 @@
   .btn:active{transform:scale(.98)}
   .btn.cobrar{background:var(--green)}
   .btn.cobrar:active{background:var(--green-press)}
-  .btn.cancelar{flex:0 0 70px;background:var(--line);color:var(--muted)}
+  .btn.cancelar{flex:0 0 56px;background:var(--line);color:var(--muted)}
+  .btn.comanda{background:var(--panel-2);color:var(--txt);border:1px solid var(--line);font-size:15px}
 
   #reporte{flex-direction:column;overflow-y:auto;padding:16px}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
@@ -180,6 +181,9 @@
     #printArea .sm{font-size:10px}
     #printArea .r{display:flex;justify-content:space-between;gap:10px}
     #printArea .sep{border-top:1px dashed #000;margin:6px 0}
+    #printArea .comanda .big{font-size:19px}
+    #printArea .comanda .cit{font-size:18px;font-weight:bold;margin:7px 0;line-height:1.3}
+    #printArea .comanda .q{display:inline-block;min-width:34px}
     @page{margin:4mm}
   }
 </style>
@@ -207,6 +211,7 @@
         <div class="totline"><span class="lbl">Total</span><span class="big" id="ticketTotal">$0</span></div>
         <div class="row2">
           <button class="btn cancelar" id="btnCancelar">✕</button>
+          <button class="btn comanda" id="btnComanda">🍳 Comanda</button>
           <button class="btn cobrar" id="btnCobrar">Cobrar</button>
         </div>
       </div>
@@ -567,6 +572,23 @@
     $("#ticketTotal").textContent=peso(ticketTotal());
   }
   $("#btnCancelar").addEventListener("click",()=>{ ticket=[]; renderTicket(); });
+
+  // ---- Comanda para la cocina ----
+  function ordenKey(){ return "pos_orden_"+todayKey(); }
+  function nextOrden(){ const n=(lget(ordenKey(),0)||0)+1; lset(ordenKey(),n); return n; }
+  function comandaHTML(items,orden){
+    const hh=new Date().toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
+    const lines=items.map(t=>`<div class="cit"><span class="q">${t.qty}×</span>${esc(t.nombre)}</div>`).join("");
+    return `<div class="tk comanda"><div class="c b big">COMANDA</div>
+      <div class="c">Orden #${orden} · ${hh}</div><div class="sep"></div>${lines}<div class="sep"></div></div>`;
+  }
+  $("#btnComanda").addEventListener("click",()=>{
+    if(!ticket.length){ toast("Agrega productos primero"); return; }
+    const orden=nextOrden();
+    $("#printArea").innerHTML=comandaHTML(ticket,orden);
+    window.print();
+    toast("🍳 Comanda #"+orden+" enviada");
+  });
 
   const quickVals=[50,100,200,500];
   $("#btnCobrar").addEventListener("click",()=>{
