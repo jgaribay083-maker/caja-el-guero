@@ -147,6 +147,11 @@
   .paymethods{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
   .paymethods button{height:48px;border-radius:10px;border:1px solid var(--line);background:var(--panel-2);color:var(--muted);font-weight:700;font-size:13px;cursor:pointer}
   .paymethods button.sel{border-color:var(--accent);background:var(--panel);color:var(--txt)}
+  .nchips{display:flex;flex-wrap:wrap;gap:8px}
+  .nchip{background:var(--panel-2);border:1px solid var(--line);color:var(--muted);padding:9px 13px;border-radius:20px;font-size:13px;font-weight:700;cursor:pointer}
+  .nchip.sel{border-color:var(--accent);background:var(--panel);color:var(--txt)}
+  .item .info{cursor:pointer}
+  .item .info .nota{color:var(--accent);font-size:13px;margin-top:2px}
   .minibtn{background:var(--panel-2);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:8px 12px;font-size:14px;font-weight:700;cursor:pointer}
   .corte-fecha{color:var(--muted);font-size:14px;margin-bottom:12px}
   .corte-resumen{margin:6px 0 16px}
@@ -316,6 +321,18 @@
       <datalist id="gcatList"><option value="Insumos"><option value="Renta"><option value="Sueldos"><option value="Servicios"><option value="Otros"></datalist></div>
     <div class="field"><label style="display:flex;align-items:center;cursor:pointer"><input type="checkbox" id="gEfectivo" checked style="width:auto;margin-right:8px">Pagado en efectivo (de la caja)</label></div>
     <div class="row2"><button class="btn sec" id="gCancelar">Cancelar</button><button class="btn guardar" id="gGuardar">Guardar</button></div>
+  </div>
+</div>
+
+<!-- Modal nota para la cocina -->
+<div class="overlay" id="notaModal">
+  <div class="modal">
+    <h3>📝 Nota para la cocina</h3>
+    <div id="notaItemName" style="color:var(--muted);margin-bottom:12px"></div>
+    <div class="nchips" id="notaChips"></div>
+    <div class="field" style="margin-top:14px"><label>Otra nota</label>
+      <input id="notaText" type="text" placeholder="Ej. sin cebolla, bien dorado"></div>
+    <div class="row2"><button class="btn sec" id="notaCancelar">Cancelar</button><button class="btn guardar" id="notaGuardar">Guardar</button></div>
   </div>
 </div>
 
@@ -557,28 +574,55 @@
   }
   function addToTicket(pid){
     const p=menu.find(m=>m.id===pid); if(!p) return;
-    const ex=ticket.find(t=>t.prodId===pid);
-    if(ex) ex.qty++; else ticket.push({prodId:pid,nombre:p.nombre,precio:p.precio,qty:1});
+    const ex=ticket.find(t=>t.prodId===pid && !(t.nota||"")); // mezcla solo con la línea sin nota
+    if(ex) ex.qty++; else ticket.push({prodId:pid,nombre:p.nombre,precio:p.precio,qty:1,nota:""});
     renderTicket();
   }
-  function changeQty(pid,d){ const it=ticket.find(t=>t.prodId===pid); if(!it) return; it.qty+=d; if(it.qty<=0) ticket=ticket.filter(t=>t.prodId!==pid); renderTicket(); }
+  function changeQty(idx,d){ const it=ticket[idx]; if(!it) return; it.qty+=d; if(it.qty<=0) ticket.splice(idx,1); renderTicket(); }
+  function mergeTicket(){
+    const map={}, out=[];
+    ticket.forEach(t=>{ const k=t.prodId+"|"+(t.nota||""); if(map[k]) map[k].qty+=t.qty; else { map[k]={...t}; out.push(map[k]); } });
+    ticket=out;
+  }
   function ticketTotal(){ return ticket.reduce((s,t)=>s+t.precio*t.qty,0); }
   function renderTicket(){
     const box=$("#ticketItems");
     if(!ticket.length) box.innerHTML='<div class="vacio">Toca un producto para empezar</div>';
-    else box.innerHTML=ticket.map(t=>`<div class="item"><div class="info"><div class="n">${esc(t.nombre)}</div><div class="s">${peso(t.precio)} c/u</div></div>
-      <div class="qtybox"><button class="qbtn" data-id="${t.prodId}" data-d="-1">−</button><span class="qty">${t.qty}</span><button class="qbtn" data-id="${t.prodId}" data-d="1">+</button></div></div>`).join("");
-    $$("#ticketItems .qbtn").forEach(b=>b.addEventListener("click",()=>changeQty(b.dataset.id,parseInt(b.dataset.d))));
+    else box.innerHTML=ticket.map((t,idx)=>`<div class="item"><div class="info" data-idx="${idx}"><div class="n">${esc(t.nombre)}</div>
+      <div class="s">${peso(t.precio)} c/u</div>${t.nota?`<div class="nota">📝 ${esc(t.nota)}</div>`:`<div class="nota" style="color:var(--muted);opacity:.6">+ nota</div>`}</div>
+      <div class="qtybox"><button class="qbtn" data-idx="${idx}" data-d="-1">−</button><span class="qty">${t.qty}</span><button class="qbtn" data-idx="${idx}" data-d="1">+</button></div></div>`).join("");
+    $$("#ticketItems .qbtn").forEach(b=>b.addEventListener("click",()=>changeQty(parseInt(b.dataset.idx),parseInt(b.dataset.d))));
+    $$("#ticketItems .info").forEach(b=>b.addEventListener("click",()=>openNota(parseInt(b.dataset.idx))));
     $("#ticketTotal").textContent=peso(ticketTotal());
   }
   $("#btnCancelar").addEventListener("click",()=>{ ticket=[]; renderTicket(); });
+
+  // ---- Notas por platillo ----
+  const NOTA_CHIPS=["con todo","sin salsa","sin cebolla","sin cilantro","con queso asadero","para llevar"];
+  let notaIdx=null;
+  $("#notaChips").innerHTML=NOTA_CHIPS.map(c=>`<button class="nchip" data-c="${esc(c)}">${esc(c)}</button>`).join("");
+  function syncNotaChips(){ const txt=$("#notaText").value.toLowerCase(); $$("#notaChips .nchip").forEach(b=>b.classList.toggle("sel",txt.includes(b.dataset.c.toLowerCase()))); }
+  $$("#notaChips .nchip").forEach(b=>b.addEventListener("click",()=>{
+    const c=b.dataset.c; let parts=$("#notaText").value.split(",").map(s=>s.trim()).filter(Boolean);
+    const i=parts.findIndex(p=>p.toLowerCase()===c.toLowerCase());
+    if(i>=0) parts.splice(i,1); else parts.push(c);
+    $("#notaText").value=parts.join(", "); syncNotaChips();
+  }));
+  $("#notaText").addEventListener("input",syncNotaChips);
+  function openNota(idx){ notaIdx=idx; const it=ticket[idx]; if(!it) return; $("#notaItemName").textContent=it.nombre; $("#notaText").value=it.nota||""; syncNotaChips(); $("#notaModal").classList.add("show"); }
+  $("#notaCancelar").addEventListener("click",()=>$("#notaModal").classList.remove("show"));
+  $("#notaGuardar").addEventListener("click",()=>{
+    if(notaIdx==null||!ticket[notaIdx]) return;
+    ticket[notaIdx].nota=$("#notaText").value.trim();
+    mergeTicket(); renderTicket(); $("#notaModal").classList.remove("show");
+  });
 
   // ---- Comanda para la cocina ----
   function ordenKey(){ return "pos_orden_"+todayKey(); }
   function nextOrden(){ const n=(lget(ordenKey(),0)||0)+1; lset(ordenKey(),n); return n; }
   function comandaHTML(items,orden){
     const hh=new Date().toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
-    const lines=items.map(t=>`<div class="cit"><span class="q">${t.qty}×</span>${esc(t.nombre)}</div>`).join("");
+    const lines=items.map(t=>`<div class="cit"><span class="q">${t.qty}×</span>${esc(t.nombre)}${t.nota?`<div style="font-weight:normal;font-size:.82em">→ ${esc(t.nota)}</div>`:""}</div>`).join("");
     return `<div class="tk comanda"><div class="c b big">COMANDA</div>
       <div class="c">Orden #${orden} · ${hh}</div><div class="sep"></div>${lines}<div class="sep"></div></div>`;
   }
@@ -608,7 +652,7 @@
   function ticketHTML(sale){
     const d=new Date(sale.ts);
     const fecha=d.toLocaleDateString("es-MX")+"  "+d.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
-    const lines=sale.items.map(i=>`<div class="r"><span>${i.qty}x ${esc(i.nombre)}</span><span>${peso(i.precio*i.qty)}</span></div>`).join("");
+    const lines=sale.items.map(i=>`<div class="r"><span>${i.qty}x ${esc(i.nombre)}${i.nota?` (${esc(i.nota)})`:""}</span><span>${peso(i.precio*i.qty)}</span></div>`).join("");
     let pago=""; if(sale.pago&&sale.pago>=sale.total){ pago=`<div class="r"><span>Pago</span><span>${peso(sale.pago)}</span></div><div class="r"><span>Cambio</span><span>${peso(sale.pago-sale.total)}</span></div>`; }
     return `<div class="tk"><div class="c b big">Gorditas y burritos<br>el Güero</div><div class="c sm">${fecha}</div>
       <div class="sep"></div>${lines}<div class="sep"></div><div class="r b big"><span>TOTAL</span><span>${peso(sale.total)}</span></div>
@@ -620,7 +664,7 @@
     if(!ticket.length || !negocio) return;
     const pago=parseFloat($("#cPago").value)||0, tot=ticketTotal();
     const sale={ id:uid(), negocio_id:negocio.id, ts:new Date().toISOString(), total:tot,
-      pago: pago>=tot?pago:0, metodo:payMethod, items: ticket.map(t=>({nombre:t.nombre,precio:t.precio,qty:t.qty})), dispositivo:deviceId };
+      pago: pago>=tot?pago:0, metodo:payMethod, items: ticket.map(t=>({nombre:t.nombre,precio:t.precio,qty:t.qty,nota:t.nota||""})), dispositivo:deviceId };
     sales.unshift(sale); lset(K.sales,sales);
     outbox.push({type:"venta",row:sale}); lset(K.outbox,outbox);
     ticket=[]; renderTicket(); $("#cobroModal").classList.remove("show");
@@ -645,7 +689,7 @@
     $("#topProds").innerHTML=arr.length?arr.map(([n,q])=>`<div class="pbar"><div class="pn">${esc(n)}</div><div class="track"><div class="fill" style="width:${q/max*100}%"></div></div><div class="pc">${q}</div></div>`).join(""):'<div style="color:var(--muted);font-size:14px">Sin ventas este día.</div>';
     $("#saleList").innerHTML=dayar.length?dayar.map(s=>{
       const t=new Date(s.ts),hh=t.toLocaleTimeString("es-MX",{hour:"2-digit",minute:"2-digit"});
-      const det=(s.items||[]).map(i=>`${i.qty}× ${esc(i.nombre)}`).join(", ");
+      const det=(s.items||[]).map(i=>`${i.qty}× ${esc(i.nombre)}${i.nota?` (${esc(i.nota)})`:""}`).join(", ");
       const ml=METODOS[s.metodo||"efectivo"]||"Efectivo";
       return `<div class="sale"><div class="top"><span class="time">${hh} · ${ml}</span><span class="amt">${peso(s.total)}</span></div>
         <div class="det">${det}</div><button class="prn" data-print="${s.id}">🖨 Imprimir</button><button class="del" data-id="${s.id}">Eliminar</button></div>`;
