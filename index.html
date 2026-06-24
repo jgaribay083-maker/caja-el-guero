@@ -567,7 +567,7 @@
   function renderMenu(){
     const g=$("#menuGrid");
     if(!menu.length){ g.innerHTML='<div class="empty">No hay productos.<br>Ve a la pestaña <b>Menú</b> para agregarlos.</div>'; return; }
-    const list=activeCat? menu.filter(p=>(p.cat||"Otros")===activeCat) : menu;
+    const list=(activeCat? menu.filter(p=>(p.cat||"Otros")===activeCat) : menu).filter(p=>p.activo!==false);
     g.innerHTML=list.map(p=>`<button class="prod" data-id="${p.id}"><div class="emoji">${p.emoji||"🍽️"}</div>
       <div><div class="nm">${esc(p.nombre)}</div><div class="pr">${peso(p.precio)}</div></div></button>`).join("");
     $$("#menuGrid .prod").forEach(b=>b.addEventListener("click",()=>addToTicket(b.dataset.id)));
@@ -798,9 +798,17 @@
   function renderEdit(){
     const cats=getCats();
     const sorted=menu.slice().sort((a,b)=>cats.indexOf(a.cat||"Otros")-cats.indexOf(b.cat||"Otros") || (a.orden||0)-(b.orden||0));
-    $("#editList").innerHTML=sorted.map(p=>`<div class="editrow"><span class="e">${p.emoji||"🍽️"}</span>
+    $("#editList").innerHTML=sorted.map(p=>`<div class="editrow" style="${p.activo===false?'opacity:.55':''}"><span class="e">${p.emoji||"🍽️"}</span>
       <span class="nm">${esc(p.nombre)}<br><small style="color:var(--muted);font-weight:400">${esc(p.cat||"Otros")}</small></span>
+      <button class="agot" data-id="${p.id}" title="Disponibilidad">${p.activo===false?"🔴":"🟢"}</button>
       <span class="pr">${peso(p.precio)}</span><button class="edit" data-id="${p.id}">✎</button><button class="del" data-id="${p.id}">🗑</button></div>`).join("");
+    $$("#editList .agot").forEach(b=>b.addEventListener("click",()=>{
+      const p=menu.find(m=>m.id===b.dataset.id); if(!p) return;
+      p.activo = p.activo===false ? true : false;
+      lset(K.menu,menu); renderEdit(); renderChips(); renderMenu();
+      toast(p.activo===false?"🔴 "+p.nombre+" agotado":"🟢 "+p.nombre+" disponible");
+      outbox.push({type:"prod_up",row:{...p}}); lset(K.outbox,outbox); flushOutbox();
+    }));
     $$("#editList .edit").forEach(b=>b.addEventListener("click",()=>openProd(b.dataset.id)));
     $$("#editList .del").forEach(b=>b.addEventListener("click",()=>{
       const p=menu.find(m=>m.id===b.dataset.id);
