@@ -51,6 +51,8 @@
   .prod{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 12px;
     min-height:96px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;text-align:left;transition:transform .05s}
   .prod:active{transform:scale(.96);background:var(--panel-2)}
+  .prod.vr{border:2px dashed var(--accent);background:var(--panel-2)}
+  .prod.vr .pr{color:var(--muted);font-size:13px}
   .prod .emoji{font-size:26px;line-height:1}
   .prod .nm{font-weight:700;font-size:15px;margin-top:6px}
   .prod .pr{color:var(--accent);font-weight:800;font-size:16px;margin-top:2px}
@@ -364,6 +366,16 @@
   </div>
 </div>
 
+<!-- Modal venta rápida -->
+<div class="overlay" id="vrModal">
+  <div class="modal">
+    <h3>➕ Venta rápida</h3>
+    <div class="field"><label>Precio ($)</label><input id="vrPrecio" type="number" inputmode="decimal" placeholder="0"></div>
+    <div class="field"><label>Nombre (opcional)</label><input id="vrNombre" type="text" placeholder="Ej. Chicles, chiltepín…"></div>
+    <div class="row2"><button class="btn sec" id="vrCancelar">Cancelar</button><button class="btn guardar" id="vrAgregar">Agregar</button></div>
+  </div>
+</div>
+
 <div id="printArea"></div>
 <div class="toast" id="toast"></div>
 
@@ -568,9 +580,10 @@
     const g=$("#menuGrid");
     if(!menu.length){ g.innerHTML='<div class="empty">No hay productos.<br>Ve a la pestaña <b>Menú</b> para agregarlos.</div>'; return; }
     const list=(activeCat? menu.filter(p=>(p.cat||"Otros")===activeCat) : menu).filter(p=>p.activo!==false);
-    g.innerHTML=list.map(p=>`<button class="prod" data-id="${p.id}"><div class="emoji">${p.emoji||"🍽️"}</div>
+    const vrCard=`<button class="prod vr"><div class="emoji">➕</div><div><div class="nm">Venta rápida</div><div class="pr">Otro precio</div></div></button>`;
+    g.innerHTML=vrCard+list.map(p=>`<button class="prod" data-id="${p.id}"><div class="emoji">${p.emoji||"🍽️"}</div>
       <div><div class="nm">${esc(p.nombre)}</div><div class="pr">${peso(p.precio)}</div></div></button>`).join("");
-    $$("#menuGrid .prod").forEach(b=>b.addEventListener("click",()=>addToTicket(b.dataset.id)));
+    $$("#menuGrid .prod").forEach(b=>b.addEventListener("click",()=> b.classList.contains("vr") ? openVR() : addToTicket(b.dataset.id)));
   }
   function addToTicket(pid){
     const p=menu.find(m=>m.id===pid); if(!p) return;
@@ -584,18 +597,32 @@
     ticket.forEach(t=>{ const k=t.prodId+"|"+(t.nota||""); if(map[k]) map[k].qty+=t.qty; else { map[k]={...t}; out.push(map[k]); } });
     ticket=out;
   }
-  function ticketTotal(){ return ticket.reduce((s,t)=>s+t.precio*t.qty,0); }
+  const ASADERO_EXTRA=10;                                  // queso asadero suma $10
+  function asaderoOf(nota){ return /asadero/i.test(nota||"") ? ASADERO_EXTRA : 0; }
+  function unitPrice(t){ return t.precio + asaderoOf(t.nota); }
+  function ticketTotal(){ return ticket.reduce((s,t)=>s+unitPrice(t)*t.qty,0); }
   function renderTicket(){
     const box=$("#ticketItems");
     if(!ticket.length) box.innerHTML='<div class="vacio">Toca un producto para empezar</div>';
     else box.innerHTML=ticket.map((t,idx)=>`<div class="item"><div class="info" data-idx="${idx}"><div class="n">${esc(t.nombre)}</div>
-      <div class="s">${peso(t.precio)} c/u</div>${t.nota?`<div class="nota">📝 ${esc(t.nota)}</div>`:`<div class="nota" style="color:var(--muted);opacity:.6">+ nota</div>`}</div>
+      <div class="s">${peso(unitPrice(t))} c/u</div>${t.nota?`<div class="nota">📝 ${esc(t.nota)}</div>`:`<div class="nota" style="color:var(--muted);opacity:.6">+ nota</div>`}</div>
       <div class="qtybox"><button class="qbtn" data-idx="${idx}" data-d="-1">−</button><span class="qty">${t.qty}</span><button class="qbtn" data-idx="${idx}" data-d="1">+</button></div></div>`).join("");
     $$("#ticketItems .qbtn").forEach(b=>b.addEventListener("click",()=>changeQty(parseInt(b.dataset.idx),parseInt(b.dataset.d))));
     $$("#ticketItems .info").forEach(b=>b.addEventListener("click",()=>openNota(parseInt(b.dataset.idx))));
     $("#ticketTotal").textContent=peso(ticketTotal());
   }
   $("#btnCancelar").addEventListener("click",()=>{ ticket=[]; renderTicket(); });
+
+  // ---- Venta rápida (productos sin precio fijo) ----
+  function openVR(){ $("#vrPrecio").value=""; $("#vrNombre").value=""; $("#vrModal").classList.add("show"); setTimeout(()=>$("#vrPrecio").focus(),50); }
+  $("#vrCancelar").addEventListener("click",()=>$("#vrModal").classList.remove("show"));
+  $("#vrAgregar").addEventListener("click",()=>{
+    const pr=parseFloat($("#vrPrecio").value);
+    if(isNaN(pr)||pr<=0){ toast("Pon un precio válido"); return; }
+    const nm=$("#vrNombre").value.trim()||"Venta rápida";
+    ticket.push({prodId:"vr_"+uid(),nombre:nm,precio:pr,qty:1,nota:""});
+    renderTicket(); $("#vrModal").classList.remove("show");
+  });
 
   // ---- Notas por platillo ----
   const NOTA_CHIPS=["con todo","sin salsa","sin cebolla","sin cilantro","con queso asadero","para llevar"];
@@ -664,7 +691,7 @@
     if(!ticket.length || !negocio) return;
     const pago=parseFloat($("#cPago").value)||0, tot=ticketTotal();
     const sale={ id:uid(), negocio_id:negocio.id, ts:new Date().toISOString(), total:tot,
-      pago: pago>=tot?pago:0, metodo:payMethod, items: ticket.map(t=>({nombre:t.nombre,precio:t.precio,qty:t.qty,nota:t.nota||""})), dispositivo:deviceId };
+      pago: pago>=tot?pago:0, metodo:payMethod, items: ticket.map(t=>({nombre:t.nombre,precio:unitPrice(t),qty:t.qty,nota:t.nota||""})), dispositivo:deviceId };
     sales.unshift(sale); lset(K.sales,sales);
     outbox.push({type:"venta",row:sale}); lset(K.outbox,outbox);
     ticket=[]; renderTicket(); $("#cobroModal").classList.remove("show");
